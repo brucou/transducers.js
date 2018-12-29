@@ -1,15 +1,13 @@
-
 // basic protocol helpers
 
-var symbolExists = typeof Symbol !== 'undefined';
+const symbolExists = typeof Symbol !== 'undefined';
 
-var protocols = {
+const protocols = {
   iterator: symbolExists ? Symbol.iterator : '@@iterator'
 };
 
 function throwProtocolError(name, coll) {
-  throw new Error("don't know how to " + name + " collection: " +
-                  coll);
+  throw new Error(`don't know how to ${name} collection: ${coll}`);
 }
 
 function fulfillsProtocol(obj, name) {
@@ -26,8 +24,8 @@ function getProtocolProperty(obj, name) {
   return obj[protocols[name]];
 }
 
-function iterator(coll) {
-  var iter = getProtocolProperty(coll, 'iterator');
+export function iterator(coll) {
+  const iter = getProtocolProperty(coll, 'iterator');
   if(iter) {
     return iter.call(coll);
   }
@@ -71,7 +69,7 @@ function ObjectIterator(obj) {
 
 ObjectIterator.prototype.next = function() {
   if(this.index < this.keys.length) {
-    var k = this.keys[this.index++];
+    const k = this.keys[this.index++];
     return {
       value: [k, this.obj[k]],
       done: false
@@ -84,8 +82,8 @@ ObjectIterator.prototype.next = function() {
 
 // helpers
 
-var toString = Object.prototype.toString;
-var isArray = typeof Array.isArray === 'function' ? Array.isArray : function(obj) {
+const toString = Object.prototype.toString;
+const isArray = typeof Array.isArray === 'function' ? Array.isArray : function(obj) {
   return toString.call(obj) == '[object Array]';
 };
 
@@ -102,12 +100,12 @@ function isNumber(x) {
   return typeof x === 'number';
 }
 
-function Reduced(value) {
+export function Reduced(value) {
   this['@@transducer/reduced'] = true;
   this['@@transducer/value'] = value;
 }
 
-function isReduced(x) {
+export function isReduced(x) {
   return (x instanceof Reduced) || (x && x['@@transducer/reduced']);
 }
 
@@ -140,11 +138,12 @@ function ensureUnreduced(v) {
   }
 }
 
-function reduce(coll, xform, init) {
+// Core
+export function reduce(coll, xform, init) {
   if(isArray(coll)) {
     var result = init;
     var index = -1;
-    var len = coll.length;
+    const len = coll.length;
     while(++index < len) {
       result = xform['@@transducer/step'](result, coll[index]);
       if(isReduced(result)) {
@@ -171,7 +170,7 @@ function reduce(coll, xform, init) {
   throwProtocolError('iterate', coll);
 }
 
-function transduce(coll, xform, reducer, init) {
+export function transduce(coll, xform, reducer, init) {
   xform = xform(reducer);
   if(init === undefined) {
     init = xform['@@transducer/init']();
@@ -179,8 +178,8 @@ function transduce(coll, xform, reducer, init) {
   return reduce(coll, xform, init);
 }
 
-function compose() {
-  var funcs = Array.prototype.slice.call(arguments);
+export function compose() {
+  const funcs = Array.prototype.slice.call(arguments);
   return function(r) {
     var value = r;
     for(var i=funcs.length-1; i>=0; i--) {
@@ -190,19 +189,7 @@ function compose() {
   }
 }
 
-// transformations
-
-function transformer(f) {
-  var t = {};
-  t['@@transducer/init'] = function() {
-    throw new Error('init value unavailable');
-  };
-  t['@@transducer/result'] = function(v) {
-    return v;
-  };
-  t['@@transducer/step'] = f;
-  return t;
-}
+// transformations helpers
 
 function bound(f, ctx, count) {
   count = count != null ? count : 1;
@@ -212,23 +199,23 @@ function bound(f, ctx, count) {
   }
   else {
     switch(count) {
-    case 1:
-      return function(x) {
-        return f.call(ctx, x);
-      }
-    case 2:
-      return function(x, y) {
-        return f.call(ctx, x, y);
-      }
-    default:
-      return f.bind(ctx);
+      case 1:
+        return function(x) {
+          return f.call(ctx, x);
+        }
+      case 2:
+        return function(x, y) {
+          return f.call(ctx, x, y);
+        }
+      default:
+        return f.bind(ctx);
     }
   }
 }
 
 function arrayMap(arr, f, ctx) {
   var index = -1;
-  var length = arr.length;
+  const length = arr.length;
   var result = Array(length);
   f = bound(f, ctx, 2);
 
@@ -239,7 +226,7 @@ function arrayMap(arr, f, ctx) {
 }
 
 function arrayFilter(arr, f, ctx) {
-  var len = arr.length;
+  const len = arr.length;
   var result = [];
   f = bound(f, ctx, 2);
 
@@ -268,27 +255,6 @@ Map.prototype['@@transducer/step'] = function(res, input) {
   return this.xform['@@transducer/step'](res, this.f(input));
 };
 
-function map(coll, f, ctx) {
-  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
-  f = bound(f, ctx);
-
-  if(coll) {
-    if(isArray(coll)) {
-      return arrayMap(coll, f, ctx);
-    }
-    return seq(coll, map(f));
-  }
-
-  return function(xform) {
-    return new Map(f, xform);
-  }
-}
-
-function Filter(f, xform) {
-  this.xform = xform;
-  this.f = f;
-}
-
 Filter.prototype['@@transducer/init'] = function() {
   return this.xform['@@transducer/init']();
 };
@@ -304,30 +270,9 @@ Filter.prototype['@@transducer/step'] = function(res, input) {
   return res;
 };
 
-function filter(coll, f, ctx) {
-  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
-  f = bound(f, ctx);
-
-  if(coll) {
-    if(isArray(coll)) {
-      return arrayFilter(coll, f, ctx);
-    }
-    return seq(coll, filter(f));
-  }
-
-  return function(xform) {
-    return new Filter(f, xform);
-  };
-}
-
-function remove(coll, f, ctx) {
-  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
-  f = bound(f, ctx);
-  return filter(coll, function(x) { return !f(x); });
-}
-
-function keep(coll) {
-  return filter(coll, function(x) { return x != null });
+function Filter(f, xform) {
+  this.xform = xform;
+  this.f = f;
 }
 
 function Dedupe(xform) {
@@ -351,16 +296,6 @@ Dedupe.prototype['@@transducer/step'] = function(result, input) {
   return result;
 };
 
-function dedupe(coll) {
-  if(coll) {
-    return seq(coll, dedupe());
-  }
-
-  return function(xform) {
-    return new Dedupe(xform);
-  }
-}
-
 function TakeWhile(f, xform) {
   this.xform = xform;
   this.f = f;
@@ -380,19 +315,6 @@ TakeWhile.prototype['@@transducer/step'] = function(result, input) {
   }
   return new Reduced(result);
 };
-
-function takeWhile(coll, f, ctx) {
-  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
-  f = bound(f, ctx);
-
-  if(coll) {
-    return seq(coll, takeWhile(f));
-  }
-
-  return function(xform) {
-    return new TakeWhile(f, xform);
-  }
-}
 
 function Take(n, xform) {
   this.n = n;
@@ -421,18 +343,6 @@ Take.prototype['@@transducer/step'] = function(result, input) {
   return result;
 };
 
-function take(coll, n) {
-  if(isNumber(coll)) { n = coll; coll = null }
-
-  if(coll) {
-    return seq(coll, take(n));
-  }
-
-  return function(xform) {
-    return new Take(n, xform);
-  }
-}
-
 function Drop(n, xform) {
   this.n = n;
   this.i = 0;
@@ -453,18 +363,6 @@ Drop.prototype['@@transducer/step'] = function(result, input) {
   }
   return this.xform['@@transducer/step'](result, input);
 };
-
-function drop(coll, n) {
-  if(isNumber(coll)) { n = coll; coll = null }
-
-  if(coll) {
-    return seq(coll, drop(n));
-  }
-
-  return function(xform) {
-    return new Drop(n, xform);
-  }
-}
 
 function DropWhile(f, xform) {
   this.xform = xform;
@@ -491,19 +389,6 @@ DropWhile.prototype['@@transducer/step'] = function(result, input) {
   }
   return this.xform['@@transducer/step'](result, input);
 };
-
-function dropWhile(coll, f, ctx) {
-  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
-  f = bound(f, ctx);
-
-  if(coll) {
-    return seq(coll, dropWhile(f));
-  }
-
-  return function(xform) {
-    return new DropWhile(f, xform);
-  }
-}
 
 function Partition(n, xform) {
   this.n = n;
@@ -534,22 +419,6 @@ Partition.prototype['@@transducer/step'] = function(result, input) {
   }
   return result;
 };
-
-function partition(coll, n) {
-  if (isNumber(coll)) {
-    n = coll; coll = null;
-  }
-
-  if (coll) {
-    return seq(coll, partition(n));
-  }
-
-  return function(xform) {
-    return new Partition(n, xform);
-  };
-}
-
-var NOTHING = {};
 
 function PartitionBy(f, xform) {
   // TODO: take an "opts" object that allows the user to specify
@@ -584,19 +453,6 @@ PartitionBy.prototype['@@transducer/step'] = function(result, input) {
   return result;
 };
 
-function partitionBy(coll, f, ctx) {
-  if (isFunction(coll)) { ctx = f; f = coll; coll = null; }
-  f = bound(f, ctx);
-
-  if (coll) {
-    return seq(coll, partitionBy(f));
-  }
-
-  return function(xform) {
-    return new PartitionBy(f, xform);
-  };
-}
-
 function Interpose(sep, xform) {
   this.sep = sep;
   this.xform = xform;
@@ -625,21 +481,6 @@ Interpose.prototype['@@transducer/step'] = function(result, input) {
   }
 };
 
-/**
- * Returns a new collection containing elements of the given
- * collection, separated by the specified separator. Returns a
- * transducer if a collection is not provided.
- */
-function interpose(coll, separator) {
-  if (arguments.length === 1) {
-    separator = coll;
-    return function(xform) {
-      return new Interpose(separator, xform);
-    };
-  }
-  return seq(coll, interpose(separator));
-}
-
 function Repeat(n, xform) {
   this.xform = xform;
   this.n = n;
@@ -665,21 +506,6 @@ Repeat.prototype['@@transducer/step'] = function(result, input) {
   return r;
 };
 
-/**
- * Returns a new collection containing elements of the given
- * collection, each repeated n times. Returns a transducer if a
- * collection is not provided.
- */
-function repeat(coll, n) {
-  if (arguments.length === 1) {
-    n = coll;
-    return function(xform) {
-      return new Repeat(n, xform);
-    };
-  }
-  return seq(coll, repeat(n));
-}
-
 function TakeNth(n, xform) {
   this.xform = xform;
   this.n = n;
@@ -701,22 +527,6 @@ TakeNth.prototype['@@transducer/step'] = function(result, input) {
   }
   return result;
 };
-
-/**
- * Returns a new collection of every nth element of the given
- * collection. Returns a transducer if a collection is not provided.
- */
-function takeNth(coll, nth) {
-  if (arguments.length === 1) {
-    nth = coll;
-    return function(xform) {
-      return new TakeNth(nth, xform);
-    };
-  }
-  return seq(coll, takeNth(nth));
-}
-
-// pure transducers (cannot take collections)
 
 function Cat(xform) {
   this.xform = xform;
@@ -746,15 +556,6 @@ Cat.prototype['@@transducer/step'] = function(result, input) {
 
   return reduce(input, newxform, result);
 };
-
-function cat(xform) {
-  return new Cat(xform);
-}
-
-function mapcat(f, ctx) {
-  f = bound(f, ctx);
-  return compose(map(f), cat);
-}
 
 // collection helpers
 
@@ -797,28 +598,28 @@ objReducer['@@transducer/step'] = merge;
 
 // building new collections
 
-function toArray(coll, xform) {
+export function toArray(coll, xform) {
   if(!xform) {
     return reduce(coll, arrayReducer, []);
   }
   return transduce(coll, xform, arrayReducer, []);
 }
 
-function toObj(coll, xform) {
+export function toObj(coll, xform) {
   if(!xform) {
     return reduce(coll, objReducer, {});
   }
   return transduce(coll, xform, objReducer, {});
 }
 
-function toIter(coll, xform) {
+export function toIter(coll, xform) {
   if(!xform) {
     return iterator(coll);
   }
   return new LazyTransformer(xform, coll);
 }
 
-function seq(coll, xform) {
+export function seq(coll, xform) {
   if(isArray(coll)) {
     return transduce(coll, xform, arrayReducer, []);
   }
@@ -842,7 +643,7 @@ function seq(coll, xform) {
   throwProtocolError('sequence', coll);
 }
 
-function into(to, xform, from) {
+export function into(to, xform, from) {
   if(isArray(to)) {
     return transduce(from, xform, arrayReducer, to);
   }
@@ -889,7 +690,7 @@ Stepper.prototype['@@transducer/step'] = function(lt) {
   }
 }
 
-function LazyTransformer(xform, coll) {
+export function LazyTransformer(xform, coll) {
   this.iter = iterator(coll);
   this.items = [];
   this.stepper = new Stepper(xform, iterator(coll));
@@ -929,38 +730,203 @@ function range(n) {
   return arr;
 }
 
-module.exports = {
-  reduce: reduce,
-  transformer: transformer,
-  Reduced: Reduced,
-  isReduced: isReduced,
-  iterator: iterator,
-  push: push,
-  merge: merge,
-  transduce: transduce,
-  seq: seq,
-  toArray: toArray,
-  toObj: toObj,
-  toIter: toIter,
-  into: into,
-  compose: compose,
-  map: map,
-  filter: filter,
-  remove: remove,
-  cat: cat,
-  mapcat: mapcat,
-  keep: keep,
-  dedupe: dedupe,
-  take: take,
-  takeWhile: takeWhile,
-  takeNth: takeNth,
-  drop: drop,
-  dropWhile: dropWhile,
-  partition: partition,
-  partitionBy: partitionBy,
-  interpose: interpose,
-  repeat: repeat,
-  range: range,
+// Available transducers
 
-  LazyTransformer: LazyTransformer
-};
+export function transformer(f) {
+  var t = {};
+  t['@@transducer/init'] = function() {
+    throw new Error('init value unavailable');
+  };
+  t['@@transducer/result'] = function(v) {
+    return v;
+  };
+  t['@@transducer/step'] = f;
+  return t;
+}
+
+export function map(coll, f, ctx) {
+  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
+  f = bound(f, ctx);
+
+  if(coll) {
+    if(isArray(coll)) {
+      return arrayMap(coll, f, ctx);
+    }
+    return seq(coll, map(f));
+  }
+
+  return function(xform) {
+    return new Map(f, xform);
+  }
+}
+
+export function filter(coll, f, ctx) {
+  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
+  f = bound(f, ctx);
+
+  if(coll) {
+    if(isArray(coll)) {
+      return arrayFilter(coll, f, ctx);
+    }
+    return seq(coll, filter(f));
+  }
+
+  return function(xform) {
+    return new Filter(f, xform);
+  };
+}
+
+export function remove(coll, f, ctx) {
+  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
+  f = bound(f, ctx);
+  return filter(coll, function(x) { return !f(x); });
+}
+
+export function keep(coll) {
+  return filter(coll, function(x) { return x != null });
+}
+
+export function dedupe(coll) {
+  if(coll) {
+    return seq(coll, dedupe());
+  }
+
+  return function(xform) {
+    return new Dedupe(xform);
+  }
+}
+
+export function takeWhile(coll, f, ctx) {
+  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
+  f = bound(f, ctx);
+
+  if(coll) {
+    return seq(coll, takeWhile(f));
+  }
+
+  return function(xform) {
+    return new TakeWhile(f, xform);
+  }
+}
+
+export function take(coll, n) {
+  if(isNumber(coll)) { n = coll; coll = null }
+
+  if(coll) {
+    return seq(coll, take(n));
+  }
+
+  return function(xform) {
+    return new Take(n, xform);
+  }
+}
+
+export function drop(coll, n) {
+  if(isNumber(coll)) { n = coll; coll = null }
+
+  if(coll) {
+    return seq(coll, drop(n));
+  }
+
+  return function(xform) {
+    return new Drop(n, xform);
+  }
+}
+
+export function dropWhile(coll, f, ctx) {
+  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
+  f = bound(f, ctx);
+
+  if(coll) {
+    return seq(coll, dropWhile(f));
+  }
+
+  return function(xform) {
+    return new DropWhile(f, xform);
+  }
+}
+
+export function partition(coll, n) {
+  if (isNumber(coll)) {
+    n = coll; coll = null;
+  }
+
+  if (coll) {
+    return seq(coll, partition(n));
+  }
+
+  return function(xform) {
+    return new Partition(n, xform);
+  };
+}
+
+const NOTHING = {};
+
+export function partitionBy(coll, f, ctx) {
+  if (isFunction(coll)) { ctx = f; f = coll; coll = null; }
+  f = bound(f, ctx);
+
+  if (coll) {
+    return seq(coll, partitionBy(f));
+  }
+
+  return function(xform) {
+    return new PartitionBy(f, xform);
+  };
+}
+
+/**
+ * Returns a new collection containing elements of the given
+ * collection, separated by the specified separator. Returns a
+ * transducer if a collection is not provided.
+ */
+export function interpose(coll, separator) {
+  if (arguments.length === 1) {
+    separator = coll;
+    return function(xform) {
+      return new Interpose(separator, xform);
+    };
+  }
+  return seq(coll, interpose(separator));
+}
+
+/**
+ * Returns a new collection containing elements of the given
+ * collection, each repeated n times. Returns a transducer if a
+ * collection is not provided.
+ */
+export function repeat(coll, n) {
+  if (arguments.length === 1) {
+    n = coll;
+    return function(xform) {
+      return new Repeat(n, xform);
+    };
+  }
+  return seq(coll, repeat(n));
+}
+
+/**
+ * Returns a new collection of every nth element of the given
+ * collection. Returns a transducer if a collection is not provided.
+ */
+export function takeNth(coll, nth) {
+  if (arguments.length === 1) {
+    nth = coll;
+    return function(xform) {
+      return new TakeNth(nth, xform);
+    };
+  }
+  return seq(coll, takeNth(nth));
+}
+
+// pure transducers (cannot take collections)
+
+export function cat(xform) {
+  return new Cat(xform);
+}
+
+export function mapcat(f, ctx) {
+  f = bound(f, ctx);
+  return compose(map(f), cat);
+}
+

@@ -1,4 +1,11 @@
+- remove startWith 
+  - it is not possible to do startWith(a) with transducers
+  - work around is to do concat([a], ...) or compose(concat(b)) so reversing order
+  - because transducers cannot look ahead, they are local and then pass forward
+  - compose(concat(b)) is the way to go, the other one is not a transducer...
+  - concat transducer will require handling error and completion nicely...
 - more transducers for observables
+  - concat
   - flatMap
   - flatMapLatest
   - concatMap

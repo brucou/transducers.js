@@ -11,7 +11,7 @@ function throwProtocolError(name, coll) {
 }
 
 function fulfillsProtocol(obj, name) {
-  if(name === 'iterator') {
+  if (name === 'iterator') {
     // Accept ill-formed iterators that don't conform to the
     // protocol by accepting just next()
     return obj[protocols.iterator] || obj.next;
@@ -26,20 +26,20 @@ function getProtocolProperty(obj, name) {
 
 export function iterator(coll) {
   const iter = getProtocolProperty(coll, 'iterator');
-  if(iter) {
+  if (iter) {
     return iter.call(coll);
   }
-  else if(coll.next) {
+  else if (coll.next) {
     // Basic duck typing to accept an ill-formed iterator that doesn't
     // conform to the iterator protocol (all iterators should have the
     // @@iterator method and return themselves, but some engines don't
     // have that on generators like older v8)
     return coll;
   }
-  else if(isArray(coll)) {
+  else if (isArray(coll)) {
     return new ArrayIterator(coll);
   }
-  else if(isObject(coll)) {
+  else if (isObject(coll)) {
     return new ObjectIterator(coll);
   }
 }
@@ -49,8 +49,8 @@ function ArrayIterator(arr) {
   this.index = 0;
 }
 
-ArrayIterator.prototype.next = function() {
-  if(this.index < this.arr.length) {
+ArrayIterator.prototype.next = function () {
+  if (this.index < this.arr.length) {
     return {
       value: this.arr[this.index++],
       done: false
@@ -67,8 +67,8 @@ function ObjectIterator(obj) {
   this.index = 0;
 }
 
-ObjectIterator.prototype.next = function() {
-  if(this.index < this.keys.length) {
+ObjectIterator.prototype.next = function () {
+  if (this.index < this.keys.length) {
     const k = this.keys[this.index++];
     return {
       value: [k, this.obj[k]],
@@ -83,7 +83,7 @@ ObjectIterator.prototype.next = function() {
 // helpers
 
 const toString = Object.prototype.toString;
-const isArray = typeof Array.isArray === 'function' ? Array.isArray : function(obj) {
+const isArray = typeof Array.isArray === 'function' ? Array.isArray : function (obj) {
   return toString.call(obj) == '[object Array]';
 };
 
@@ -118,7 +118,7 @@ function deref(x) {
  * Reduced-wrapping the result (e.g. "take"), to avoid nested Reduced.
  */
 function ensureReduced(val) {
-  if(isReduced(val)) {
+  if (isReduced(val)) {
     return val;
   } else {
     return new Reduced(val);
@@ -131,35 +131,109 @@ function ensureReduced(val) {
  * termination after already completing.
  */
 function ensureUnreduced(v) {
-  if(isReduced(v)) {
+  if (isReduced(v)) {
     return deref(v);
   } else {
     return v;
   }
 }
 
+function isIterable(coll) {
+  return fulfillsProtocol(coll, 'iterator') || coll.next || isObject(coll)
+}
+
+function isObservable(coll) {
+  // basic duck typing
+  return coll && coll.subscribe && typeof (coll.subscribe) === 'function'
+}
+
+function tryCatch(context, fn, err){
+  return function (...args){
+    try{
+      return fn.apply(context, args)
+    }
+    catch (e) {
+      return err(e)
+    }
+  }
+}
+
 // Core
-export function reduce(coll, xform, init) {
-  if(isArray(coll)) {
+function transformForObserver(o) {
+  return {
+    "@@transducer/init": function() {
+      return o;
+    },
+    "@@transducer/step": function(o, input) {
+      o.next(input);
+      return o
+    },
+    "@@transducer/result": function(o) {
+      o.complete();
+    }
+  };
+}
+
+
+export function reduceLazyObservable(obs, xform, reducer, Observable) {
+  // There is no init here! We pass instead the Observable constructor (Cf. Observable specs)
+  // we want an observable in return. We could have init be a subject
+  // do xform["@@transducer/step"](subject, input)
+  // have the subject connect to the observer o (the one which is subscribing to new Observable)
+  // but then the subject is merely a proxy:
+  // obs.subscribe(o) => xform(subject) -> subject -> o
+  // we do directly :
+  // obs.subscribe(o) => xform(o) -> o
+  // This avoid having to deal with subject semantics (while subjects implement the observable interface, they are
+  // not lazy!!, i.e. they are not observables!!)
+  // Last, we could also renounce laziness, in which case we may have a subject in init, and return that directly
+  // but then we would call that reduceEagerObservable. For now we don't deal with this use case
+  return new Observable(o => {
+    const xf = xform(reducer(o));
+
+    return obs.subscribe({
+      next: x => {
+        try{
+          xf["@@transducer/step"](o, x);
+        }
+        catch(e){
+          console.error(`Error occurred in transducer/step!`, e);
+          o.error(e);
+        }
+      },
+      error: err => {
+        console.error(`Error occurred in observable passed to Rx transduce fn!`, err);
+        o.error(err);
+      },
+      complete: () => {
+        // NOTE : that will complete the observer
+        xf["@@transducer/result"](o);
+      }
+    })
+  })
+}
+
+export function reduceIterable(coll, xform, init) {
+  if (isArray(coll)) {
     var result = init;
     var index = -1;
     const len = coll.length;
-    while(++index < len) {
+    while ( ++index < len ) {
       result = xform['@@transducer/step'](result, coll[index]);
-      if(isReduced(result)) {
+      if (isReduced(result)) {
         result = deref(result);
         break;
       }
     }
     return xform['@@transducer/result'](result);
   }
-  else if(isObject(coll) || fulfillsProtocol(coll, 'iterator')) {
+  else if (isObject(coll) || fulfillsProtocol(coll, 'iterator')) {
     var result = init;
     var iter = iterator(coll);
     var val = iter.next();
-    while(!val.done) {
+    while ( !val.done ) {
       result = xform['@@transducer/step'](result, val.value);
-      if(isReduced(result)) {
+      if (isReduced(result)) {
         result = deref(result);
         break;
       }
@@ -170,19 +244,26 @@ export function reduce(coll, xform, init) {
   throwProtocolError('iterate', coll);
 }
 
-export function transduce(coll, xform, reducer, init) {
+export function transduceLazyObservable(obs, xform, Observable) {
+  return reduceLazyObservable(obs, xform, transformForObserver, Observable);
+}
+
+export function transduce(foldable, xform, reducer, init) {
   xform = xform(reducer);
-  if(init === undefined) {
+  if (init === undefined) {
     init = xform['@@transducer/init']();
   }
-  return reduce(coll, xform, init);
+
+  if (isIterable(foldable)) {
+    return reduceIterable(foldable, xform, init);
+  }
 }
 
 export function compose() {
   const funcs = Array.prototype.slice.call(arguments);
-  return function(r) {
+  return function (r) {
     var value = r;
-    for(var i=funcs.length-1; i>=0; i--) {
+    for (var i = funcs.length - 1; i >= 0; i--) {
       value = funcs[i](value);
     }
     return value;
@@ -194,17 +275,17 @@ export function compose() {
 function bound(f, ctx, count) {
   count = count != null ? count : 1;
 
-  if(!ctx) {
+  if (!ctx) {
     return f;
   }
   else {
-    switch(count) {
+    switch (count) {
       case 1:
-        return function(x) {
+        return function (x) {
           return f.call(ctx, x);
         }
       case 2:
-        return function(x, y) {
+        return function (x, y) {
           return f.call(ctx, x, y);
         }
       default:
@@ -219,7 +300,7 @@ function arrayMap(arr, f, ctx) {
   var result = Array(length);
   f = bound(f, ctx, 2);
 
-  while (++index < length) {
+  while ( ++index < length ) {
     result[index] = f(arr[index], index);
   }
   return result;
@@ -230,8 +311,8 @@ function arrayFilter(arr, f, ctx) {
   var result = [];
   f = bound(f, ctx, 2);
 
-  for(var i=0; i<len; i++) {
-    if(f(arr[i], i)) {
+  for (var i = 0; i < len; i++) {
+    if (f(arr[i], i)) {
       result.push(arr[i]);
     }
   }
@@ -243,28 +324,28 @@ function Map(f, xform) {
   this.f = f;
 }
 
-Map.prototype['@@transducer/init'] = function() {
+Map.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-Map.prototype['@@transducer/result'] = function(v) {
+Map.prototype['@@transducer/result'] = function (v) {
   return this.xform['@@transducer/result'](v);
 };
 
-Map.prototype['@@transducer/step'] = function(res, input) {
+Map.prototype['@@transducer/step'] = function (res, input) {
   return this.xform['@@transducer/step'](res, this.f(input));
 };
 
-Filter.prototype['@@transducer/init'] = function() {
+Filter.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-Filter.prototype['@@transducer/result'] = function(v) {
+Filter.prototype['@@transducer/result'] = function (v) {
   return this.xform['@@transducer/result'](v);
 };
 
-Filter.prototype['@@transducer/step'] = function(res, input) {
-  if(this.f(input)) {
+Filter.prototype['@@transducer/step'] = function (res, input) {
+  if (this.f(input)) {
     return this.xform['@@transducer/step'](res, input);
   }
   return res;
@@ -280,16 +361,16 @@ function Dedupe(xform) {
   this.last = undefined;
 }
 
-Dedupe.prototype['@@transducer/init'] = function() {
+Dedupe.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-Dedupe.prototype['@@transducer/result'] = function(v) {
+Dedupe.prototype['@@transducer/result'] = function (v) {
   return this.xform['@@transducer/result'](v);
 };
 
-Dedupe.prototype['@@transducer/step'] = function(result, input) {
-  if(input !== this.last) {
+Dedupe.prototype['@@transducer/step'] = function (result, input) {
+  if (input !== this.last) {
     this.last = input;
     return this.xform['@@transducer/step'](result, input);
   }
@@ -301,16 +382,16 @@ function TakeWhile(f, xform) {
   this.f = f;
 }
 
-TakeWhile.prototype['@@transducer/init'] = function() {
+TakeWhile.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-TakeWhile.prototype['@@transducer/result'] = function(v) {
+TakeWhile.prototype['@@transducer/result'] = function (v) {
   return this.xform['@@transducer/result'](v);
 };
 
-TakeWhile.prototype['@@transducer/step'] = function(result, input) {
-  if(this.f(input)) {
+TakeWhile.prototype['@@transducer/step'] = function (result, input) {
+  if (this.f(input)) {
     return this.xform['@@transducer/step'](result, input);
   }
   return new Reduced(result);
@@ -322,18 +403,18 @@ function Take(n, xform) {
   this.xform = xform;
 }
 
-Take.prototype['@@transducer/init'] = function() {
+Take.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-Take.prototype['@@transducer/result'] = function(v) {
+Take.prototype['@@transducer/result'] = function (v) {
   return this.xform['@@transducer/result'](v);
 };
 
-Take.prototype['@@transducer/step'] = function(result, input) {
+Take.prototype['@@transducer/step'] = function (result, input) {
   if (this.i < this.n) {
     result = this.xform['@@transducer/step'](result, input);
-    if(this.i + 1 >= this.n) {
+    if (this.i + 1 >= this.n) {
       // Finish reducing on the same step as the final value. TODO:
       // double-check that this doesn't break any semantics
       result = ensureReduced(result);
@@ -349,16 +430,16 @@ function Drop(n, xform) {
   this.xform = xform;
 }
 
-Drop.prototype['@@transducer/init'] = function() {
+Drop.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-Drop.prototype['@@transducer/result'] = function(v) {
+Drop.prototype['@@transducer/result'] = function (v) {
   return this.xform['@@transducer/result'](v);
 };
 
-Drop.prototype['@@transducer/step'] = function(result, input) {
-  if(this.i++ < this.n) {
+Drop.prototype['@@transducer/step'] = function (result, input) {
+  if (this.i++ < this.n) {
     return result;
   }
   return this.xform['@@transducer/step'](result, input);
@@ -370,17 +451,17 @@ function DropWhile(f, xform) {
   this.dropping = true;
 }
 
-DropWhile.prototype['@@transducer/init'] = function() {
+DropWhile.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-DropWhile.prototype['@@transducer/result'] = function(v) {
+DropWhile.prototype['@@transducer/result'] = function (v) {
   return this.xform['@@transducer/result'](v);
 };
 
-DropWhile.prototype['@@transducer/step'] = function(result, input) {
-  if(this.dropping) {
-    if(this.f(input)) {
+DropWhile.prototype['@@transducer/step'] = function (result, input) {
+  if (this.dropping) {
+    if (this.f(input)) {
       return result;
     }
     else {
@@ -397,18 +478,18 @@ function Partition(n, xform) {
   this.part = new Array(n);
 }
 
-Partition.prototype['@@transducer/init'] = function() {
+Partition.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-Partition.prototype['@@transducer/result'] = function(v) {
+Partition.prototype['@@transducer/result'] = function (v) {
   if (this.i > 0) {
     return ensureUnreduced(this.xform['@@transducer/step'](v, this.part.slice(0, this.i)));
   }
   return this.xform['@@transducer/result'](v);
 };
 
-Partition.prototype['@@transducer/step'] = function(result, input) {
+Partition.prototype['@@transducer/step'] = function (result, input) {
   this.part[this.i] = input;
   this.i += 1;
   if (this.i === this.n) {
@@ -429,11 +510,11 @@ function PartitionBy(f, xform) {
   this.last = NOTHING;
 }
 
-PartitionBy.prototype['@@transducer/init'] = function() {
+PartitionBy.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-PartitionBy.prototype['@@transducer/result'] = function(v) {
+PartitionBy.prototype['@@transducer/result'] = function (v) {
   var l = this.part.length;
   if (l > 0) {
     return ensureUnreduced(this.xform['@@transducer/step'](v, this.part.slice(0, l)));
@@ -441,7 +522,7 @@ PartitionBy.prototype['@@transducer/result'] = function(v) {
   return this.xform['@@transducer/result'](v);
 };
 
-PartitionBy.prototype['@@transducer/step'] = function(result, input) {
+PartitionBy.prototype['@@transducer/step'] = function (result, input) {
   var current = this.f(input);
   if (current === this.last || this.last === NOTHING) {
     this.part.push(input);
@@ -459,15 +540,15 @@ function Interpose(sep, xform) {
   this.started = false;
 }
 
-Interpose.prototype['@@transducer/init'] = function() {
+Interpose.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-Interpose.prototype['@@transducer/result'] = function(v) {
+Interpose.prototype['@@transducer/result'] = function (v) {
   return this.xform['@@transducer/result'](v);
 };
 
-Interpose.prototype['@@transducer/step'] = function(result, input) {
+Interpose.prototype['@@transducer/step'] = function (result, input) {
   if (this.started) {
     var withSep = this.xform['@@transducer/step'](result, this.sep);
     if (isReduced(withSep)) {
@@ -486,15 +567,15 @@ function Repeat(n, xform) {
   this.n = n;
 }
 
-Repeat.prototype['@@transducer/init'] = function() {
+Repeat.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-Repeat.prototype['@@transducer/result'] = function(v) {
+Repeat.prototype['@@transducer/result'] = function (v) {
   return this.xform['@@transducer/result'](v);
 };
 
-Repeat.prototype['@@transducer/step'] = function(result, input) {
+Repeat.prototype['@@transducer/step'] = function (result, input) {
   var n = this.n;
   var r = result;
   for (var i = 0; i < n; i++) {
@@ -512,15 +593,15 @@ function TakeNth(n, xform) {
   this.i = -1;
 }
 
-TakeNth.prototype['@@transducer/init'] = function() {
+TakeNth.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-TakeNth.prototype['@@transducer/result'] = function(v) {
+TakeNth.prototype['@@transducer/result'] = function (v) {
   return this.xform['@@transducer/result'](v);
 };
 
-TakeNth.prototype['@@transducer/step'] = function(result, input) {
+TakeNth.prototype['@@transducer/step'] = function (result, input) {
   this.i += 1;
   if (this.i % this.n === 0) {
     return this.xform['@@transducer/step'](result, input);
@@ -532,46 +613,46 @@ function Cat(xform) {
   this.xform = xform;
 }
 
-Cat.prototype['@@transducer/init'] = function() {
+Cat.prototype['@@transducer/init'] = function () {
   return this.xform['@@transducer/init']();
 };
 
-Cat.prototype['@@transducer/result'] = function(v) {
+Cat.prototype['@@transducer/result'] = function (v) {
   return this.xform['@@transducer/result'](v);
 };
 
-Cat.prototype['@@transducer/step'] = function(result, input) {
+Cat.prototype['@@transducer/step'] = function (result, input) {
   var xform = this.xform;
   var newxform = {};
-  newxform['@@transducer/init'] = function() {
+  newxform['@@transducer/init'] = function () {
     return xform['@@transducer/init']();
   };
-  newxform['@@transducer/result'] = function(v) {
+  newxform['@@transducer/result'] = function (v) {
     return v;
   };
-  newxform['@@transducer/step'] = function(result, input) {
+  newxform['@@transducer/step'] = function (result, input) {
     var val = xform['@@transducer/step'](result, input);
     return isReduced(val) ? deref(val) : val;
   };
 
-  return reduce(input, newxform, result);
+  return reduceIterable(input, newxform, result);
 };
 
 // collection helpers
 
-function push(arr, x) {
+export function push(arr, x) {
   arr.push(x);
   return arr;
 }
 
-function merge(obj, x) {
-  if(isArray(x) && x.length === 2) {
+export function merge(obj, x) {
+  if (isArray(x) && x.length === 2) {
     obj[x[0]] = x[1];
   }
   else {
     var keys = Object.keys(x);
     var len = keys.length;
-    for(var i=0; i<len; i++) {
+    for (var i = 0; i < len; i++) {
       obj[keys[i]] = x[keys[i]];
     }
   }
@@ -579,19 +660,19 @@ function merge(obj, x) {
 }
 
 var arrayReducer = {};
-arrayReducer['@@transducer/init'] = function() {
+arrayReducer['@@transducer/init'] = function () {
   return [];
 };
-arrayReducer['@@transducer/result'] = function(v) {
+arrayReducer['@@transducer/result'] = function (v) {
   return v;
 };
 arrayReducer['@@transducer/step'] = push;
 
 var objReducer = {};
-objReducer['@@transducer/init'] = function() {
+objReducer['@@transducer/init'] = function () {
   return {};
 };
-objReducer['@@transducer/result'] = function(v) {
+objReducer['@@transducer/result'] = function (v) {
   return v;
 };
 objReducer['@@transducer/step'] = merge;
@@ -599,36 +680,36 @@ objReducer['@@transducer/step'] = merge;
 // building new collections
 
 export function toArray(coll, xform) {
-  if(!xform) {
-    return reduce(coll, arrayReducer, []);
+  if (!xform) {
+    return reduceIterable(coll, arrayReducer, []);
   }
   return transduce(coll, xform, arrayReducer, []);
 }
 
 export function toObj(coll, xform) {
-  if(!xform) {
-    return reduce(coll, objReducer, {});
+  if (!xform) {
+    return reduceIterable(coll, objReducer, {});
   }
   return transduce(coll, xform, objReducer, {});
 }
 
 export function toIter(coll, xform) {
-  if(!xform) {
+  if (!xform) {
     return iterator(coll);
   }
   return new LazyTransformer(xform, coll);
 }
 
 export function seq(coll, xform) {
-  if(isArray(coll)) {
+  if (isArray(coll)) {
     return transduce(coll, xform, arrayReducer, []);
   }
-  else if(isObject(coll)) {
+  else if (isObject(coll)) {
     return transduce(coll, xform, objReducer, {});
   }
-  else if(coll['@@transducer/step']) {
+  else if (coll['@@transducer/step']) {
     var init;
-    if(coll['@@transducer/init']) {
+    if (coll['@@transducer/init']) {
       init = coll['@@transducer/init']();
     }
     else {
@@ -637,24 +718,24 @@ export function seq(coll, xform) {
 
     return transduce(coll, xform, coll, init);
   }
-  else if(fulfillsProtocol(coll, 'iterator')) {
+  else if (fulfillsProtocol(coll, 'iterator')) {
     return new LazyTransformer(xform, coll);
   }
   throwProtocolError('sequence', coll);
 }
 
 export function into(to, xform, from) {
-  if(isArray(to)) {
+  if (isArray(to)) {
     return transduce(from, xform, arrayReducer, to);
   }
-  else if(isObject(to)) {
+  else if (isObject(to)) {
     return transduce(from, xform, objReducer, to);
   }
-  else if(to['@@transducer/step']) {
+  else if (to['@@transducer/step']) {
     return transduce(from,
-                     xform,
-                     to,
-                     to);
+      xform,
+      to,
+      to);
   }
   throwProtocolError('into', to);
 }
@@ -662,10 +743,10 @@ export function into(to, xform, from) {
 // laziness
 
 var stepper = {};
-stepper['@@transducer/result'] = function(v) {
+stepper['@@transducer/result'] = function (v) {
   return isReduced(v) ? deref(v) : v;
 };
-stepper['@@transducer/step'] = function(lt, x) {
+stepper['@@transducer/step'] = function (lt, x) {
   lt.items.push(x);
   return lt.rest;
 };
@@ -675,11 +756,11 @@ function Stepper(xform, iter) {
   this.iter = iter;
 }
 
-Stepper.prototype['@@transducer/step'] = function(lt) {
+Stepper.prototype['@@transducer/step'] = function (lt) {
   var len = lt.items.length;
-  while(lt.items.length === len) {
+  while ( lt.items.length === len ) {
     var n = this.iter.next();
-    if(n.done || isReduced(n.value)) {
+    if (n.done || isReduced(n.value)) {
       // finalize
       this.xform['@@transducer/result'](this);
       break;
@@ -696,14 +777,14 @@ export function LazyTransformer(xform, coll) {
   this.stepper = new Stepper(xform, iterator(coll));
 }
 
-LazyTransformer.prototype[protocols.iterator] = function() {
+LazyTransformer.prototype[protocols.iterator] = function () {
   return this;
 }
 
-LazyTransformer.prototype.next = function() {
+LazyTransformer.prototype.next = function () {
   this['@@transducer/step']();
 
-  if(this.items.length) {
+  if (this.items.length) {
     return {
       value: this.items.pop(),
       done: false
@@ -714,8 +795,8 @@ LazyTransformer.prototype.next = function() {
   }
 };
 
-LazyTransformer.prototype['@@transducer/step'] = function() {
-  if(!this.items.length) {
+LazyTransformer.prototype['@@transducer/step'] = function () {
+  if (!this.items.length) {
     this.stepper['@@transducer/step'](this);
   }
 }
@@ -724,7 +805,7 @@ LazyTransformer.prototype['@@transducer/step'] = function() {
 
 function range(n) {
   var arr = new Array(n);
-  for(var i=0; i<arr.length; i++) {
+  for (var i = 0; i < arr.length; i++) {
     arr[i] = i;
   }
   return arr;
@@ -734,10 +815,10 @@ function range(n) {
 
 export function transformer(f) {
   var t = {};
-  t['@@transducer/init'] = function() {
+  t['@@transducer/init'] = function () {
     throw new Error('init value unavailable');
   };
-  t['@@transducer/result'] = function(v) {
+  t['@@transducer/result'] = function (v) {
     return v;
   };
   t['@@transducer/step'] = f;
@@ -745,117 +826,144 @@ export function transformer(f) {
 }
 
 export function map(coll, f, ctx) {
-  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
+  if (isFunction(coll)) {
+    ctx = f;
+    f = coll;
+    coll = null;
+  }
   f = bound(f, ctx);
 
-  if(coll) {
-    if(isArray(coll)) {
+  if (coll) {
+    if (isArray(coll)) {
       return arrayMap(coll, f, ctx);
     }
     return seq(coll, map(f));
   }
 
-  return function(xform) {
+  return function (xform) {
     return new Map(f, xform);
   }
 }
 
 export function filter(coll, f, ctx) {
-  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
+  if (isFunction(coll)) {
+    ctx = f;
+    f = coll;
+    coll = null;
+  }
   f = bound(f, ctx);
 
-  if(coll) {
-    if(isArray(coll)) {
+  if (coll) {
+    if (isArray(coll)) {
       return arrayFilter(coll, f, ctx);
     }
     return seq(coll, filter(f));
   }
 
-  return function(xform) {
+  return function (xform) {
     return new Filter(f, xform);
   };
 }
 
 export function remove(coll, f, ctx) {
-  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
+  if (isFunction(coll)) {
+    ctx = f;
+    f = coll;
+    coll = null;
+  }
   f = bound(f, ctx);
-  return filter(coll, function(x) { return !f(x); });
+  return filter(coll, function (x) { return !f(x); });
 }
 
 export function keep(coll) {
-  return filter(coll, function(x) { return x != null });
+  return filter(coll, function (x) { return x != null });
 }
 
 export function dedupe(coll) {
-  if(coll) {
+  if (coll) {
     return seq(coll, dedupe());
   }
 
-  return function(xform) {
+  return function (xform) {
     return new Dedupe(xform);
   }
 }
 
 export function takeWhile(coll, f, ctx) {
-  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
+  if (isFunction(coll)) {
+    ctx = f;
+    f = coll;
+    coll = null;
+  }
   f = bound(f, ctx);
 
-  if(coll) {
+  if (coll) {
     return seq(coll, takeWhile(f));
   }
 
-  return function(xform) {
+  return function (xform) {
     return new TakeWhile(f, xform);
   }
 }
 
 export function take(coll, n) {
-  if(isNumber(coll)) { n = coll; coll = null }
+  if (isNumber(coll)) {
+    n = coll;
+    coll = null
+  }
 
-  if(coll) {
+  if (coll) {
     return seq(coll, take(n));
   }
 
-  return function(xform) {
+  return function (xform) {
     return new Take(n, xform);
   }
 }
 
 export function drop(coll, n) {
-  if(isNumber(coll)) { n = coll; coll = null }
+  if (isNumber(coll)) {
+    n = coll;
+    coll = null
+  }
 
-  if(coll) {
+  if (coll) {
     return seq(coll, drop(n));
   }
 
-  return function(xform) {
+  return function (xform) {
     return new Drop(n, xform);
   }
 }
 
 export function dropWhile(coll, f, ctx) {
-  if(isFunction(coll)) { ctx = f; f = coll; coll = null; }
+  if (isFunction(coll)) {
+    ctx = f;
+    f = coll;
+    coll = null;
+  }
   f = bound(f, ctx);
 
-  if(coll) {
+  if (coll) {
     return seq(coll, dropWhile(f));
   }
 
-  return function(xform) {
+  return function (xform) {
     return new DropWhile(f, xform);
   }
 }
 
 export function partition(coll, n) {
   if (isNumber(coll)) {
-    n = coll; coll = null;
+    n = coll;
+    coll = null;
   }
 
   if (coll) {
     return seq(coll, partition(n));
   }
 
-  return function(xform) {
+  return function (xform) {
     return new Partition(n, xform);
   };
 }
@@ -863,14 +971,18 @@ export function partition(coll, n) {
 const NOTHING = {};
 
 export function partitionBy(coll, f, ctx) {
-  if (isFunction(coll)) { ctx = f; f = coll; coll = null; }
+  if (isFunction(coll)) {
+    ctx = f;
+    f = coll;
+    coll = null;
+  }
   f = bound(f, ctx);
 
   if (coll) {
     return seq(coll, partitionBy(f));
   }
 
-  return function(xform) {
+  return function (xform) {
     return new PartitionBy(f, xform);
   };
 }
@@ -883,7 +995,7 @@ export function partitionBy(coll, f, ctx) {
 export function interpose(coll, separator) {
   if (arguments.length === 1) {
     separator = coll;
-    return function(xform) {
+    return function (xform) {
       return new Interpose(separator, xform);
     };
   }
@@ -898,7 +1010,7 @@ export function interpose(coll, separator) {
 export function repeat(coll, n) {
   if (arguments.length === 1) {
     n = coll;
-    return function(xform) {
+    return function (xform) {
       return new Repeat(n, xform);
     };
   }
@@ -912,7 +1024,7 @@ export function repeat(coll, n) {
 export function takeNth(coll, nth) {
   if (arguments.length === 1) {
     nth = coll;
-    return function(xform) {
+    return function (xform) {
       return new TakeNth(nth, xform);
     };
   }
@@ -930,3 +1042,35 @@ export function mapcat(f, ctx) {
   return compose(map(f), cat);
 }
 
+// init is the seed, so observable
+// to start with i need in init to reduceIterable one step with the initial value
+
+function StartWith(initValue, xform) {
+  this.xform = xform;
+  this.initValue = initValue;
+  this.hasSentInitialValue = false;
+}
+
+StartWith.prototype['@@transducer/init'] = function () {
+  return this.xform['@@transducer/init']();
+};
+
+StartWith.prototype['@@transducer/result'] = function (v) {
+  return this.xform['@@transducer/result'](v);
+};
+
+StartWith.prototype['@@transducer/step'] = function (result, input) {
+  if (this.hasSentInitialValue) {
+    return this.xform['@@transducer/step'](result, input);
+  }
+  else {
+    this.hasSentInitialValue = true;
+    return this.xform['@@transducer/step'](this.xform['@@transducer/step'](result, this.initValue), input)
+  }
+};
+
+export function startWith(val) {
+  return function (xform) {
+    return new StartWith(val, xform);
+  }
+}

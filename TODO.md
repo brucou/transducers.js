@@ -1,0 +1,6 @@
+- more transducers for observables
+  - flatMap
+  - flatMapLatest
+  - concatMap
+- README to update explaining the observable API
+- up to minor version when done

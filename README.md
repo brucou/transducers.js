@@ -96,7 +96,7 @@ For the latter, you need to specify what you want back. The following functions 
 * `toIter(coll, xform?)` &mdash; Make an iterator over `coll`, and apply the transformation `xform` to each value if specified. Note that `coll` can just be another iterator. **Transformations will be applied lazily**.
 * `seq(coll, xform)` &mdash; A generalized method that will return the same data type that was passed in as `coll`, with `xform` applied. You will usually use this unless you know you want an array, object, or iterator. If `coll` is an iterator, another iterator will be returned and transformations will be applied lazily.
 * `into(to, xform, from)` &mdash; Apply `xform` to each item in `from` and append it to `to`. This has the effect of "pouring" elements into `to`. You will commonly use this when converting one type of object to another.
-* `transduce(coll, xform, reducer, init?)` &mdash; Like `reduce`, but apply `xform` to each value before passing to `reducer`. If `init` is not specify it will attempt to get it from `reducer`.
+* `transduce(coll, xform, reducer, init?)` &mdash; Like `reduceIterable`, but apply `xform` to each value before passing to `reducer`. If `init` is not specify it will attempt to get it from `reducer`.
 
 The possibilities are endless:
 
@@ -190,7 +190,7 @@ While it's great that you can apply transducers to custom data structures, it's 
 
 This conforms to the [official transducer spec](https://github.com/cognitect-labs/transducers-js/issues/20) so if you implement this, you can use it with all transducer libraries that conform to it.
 
-To implement the transducer protocol, you add methods to the prototype of your data structure. A transformer is an object with three methods: `init`, `result`, and `step`. `init` returns a new empty object, `result`, can perform any finalization steps on the resulting collection, and `step` performs a reduce. 
+To implement the transducer protocol, you add methods to the prototype of your data structure. A transformer is an object with three methods: `init`, `result`, and `step`. `init` returns a new empty object, `result`, can perform any finalization steps on the resulting collection, and `step` performs a reduceIterable. 
 
 These methods are namespaced and in the future could be symbols. Here's what it looks like for `Immutable.List`:
 

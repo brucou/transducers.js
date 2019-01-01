@@ -1,6 +1,3 @@
-** TODO ** add the observables transducers and a few notes about it and the fork
-
-
 # Motivation
 
 This is a fork from the popular `transducers.js` library. Motivation is that most of these 

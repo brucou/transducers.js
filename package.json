@@ -1,6 +1,6 @@
 {
   "name": "transducers-es6",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "author": "forked from James Long",
   "main": "transducers.js",
   "repository": {

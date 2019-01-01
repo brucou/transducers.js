@@ -1,3 +1,20 @@
+** TODO ** add the observables transducers and a few notes about it and the fork
+
+
+# Motivation
+
+This is a fork from the popular `transducers.js` library. Motivation is that most of these 
+operators were intended to deal with iterable collections and I needed to use transducers also on
+ observables. This is useful because :
+
+- in `Rxjs` v6 the `transduce` operator is gone
+- the transduce operator may give better performance for large or complex sequences, given that 
+there is no intermediate creation of observables. As with everything performance related, 
+performance should be measured to determine the conditions from which performance gains are observed
+- having transducers working on observables allows to have a tiny (4KB), tree-shakeable 
+observable library, in combination with a bare-bone event emitter. That is sufficient for most 
+needs. For more advanced needs (schedulers, concurrency operators), a full-fledged observable 
+library may be needed.
 
 # transducers.js
 
